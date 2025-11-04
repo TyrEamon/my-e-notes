@@ -38,6 +38,12 @@ export default {
       if (req.method === "POST" && url.pathname === "/api/save-bg") {
         return handleSaveBg(env, req);
       }
+      if (req.method === "GET" && url.pathname === "/api/opacity") {
+        return handleGetOpacity(env);
+      }
+      if (req.method === "POST" && url.pathname === "/api/save-opacity") {
+        return handleSaveOpacity(env, req);
+      }
       return withSecurityHeaders(new Response("Not Found", { status: 404 }));
     } catch (e) {
       return withSecurityHeaders(new Response("Internal Error", { status: 500 }));
@@ -74,9 +80,27 @@ async function getBackgroundImages(env) {
   return { pc, mobile };
 }
 
+async function getOpacitySettings(env) {
+  const settings = {
+    card: parseFloat((await env.NOTES.get("opacity:card")) || "0.28"),
+    article: parseFloat((await env.NOTES.get("opacity:article")) || "0.28"),
+    sidebar: parseFloat((await env.NOTES.get("opacity:sidebar")) || "0.22"),
+    editor: parseFloat((await env.NOTES.get("opacity:editor")) || "0.25"),
+  };
+  return settings;
+}
+
 async function handleGetBg(env) {
   const bg = await getBackgroundImages(env);
   return new Response(JSON.stringify(bg), {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+  });
+}
+
+async function handleGetOpacity(env) {
+  const opacity = await getOpacitySettings(env);
+  return new Response(JSON.stringify(opacity), {
     status: 200,
     headers: { "Content-Type": "application/json; charset=utf-8" },
   });
@@ -155,11 +179,28 @@ async function handleSaveBg(env, req) {
   return new Response(null, { status: 204 });
 }
 
+async function handleSaveOpacity(env, req) {
+  const authed = await isAuthed(env, req);
+  if (!authed) return withSecurityHeaders(new Response("Forbidden", { status: 403 }));
+
+  const data = await req.json().catch(() => ({}));
+  const { key, value } = data;
+  
+  if (!["card", "article", "sidebar", "editor"].includes(key)) {
+    return withSecurityHeaders(new Response("Bad Request", { status: 400 }));
+  }
+
+  const opacity = Math.min(Math.max(parseFloat(value) || 0.1, 0.05), 0.95);
+  await env.NOTES.put(`opacity:${key}`, opacity.toString());
+  return new Response(null, { status: 204 });
+}
+
 async function renderPublicPage(env, req) {
   const pages = await getPagesList(env);
   const firstPage = pages[0] || "page1";
   const content = (await env.NOTES.get(`note:${firstPage}`)) ?? "欢迎使用 Edge Notes！在 /admin 登录后开始编辑。";
   const bg = await getBackgroundImages(env);
+  const opacity = await getOpacitySettings(env);
   
   let pageTabs = "";
   for (const page of pages) {
@@ -171,6 +212,7 @@ async function renderPublicPage(env, req) {
     title: "Edge Notes",
     bgPc: bg.pc,
     bgMobile: bg.mobile,
+    opacity: opacity,
     body: `
       <main class="container read">
         <header>
@@ -208,6 +250,7 @@ async function renderAdminPage(env, req) {
       title: "登录 · Edge Notes",
       bgPc: "",
       bgMobile: "",
+      opacity: {},
       body: `
       <main class="container narrow">
         <h1>管理员登录</h1>
@@ -226,6 +269,7 @@ async function renderAdminPage(env, req) {
   const firstPage = pages[0] || "page1";
   const content = (await env.NOTES.get(`note:${firstPage}`)) ?? "";
   const bg = await getBackgroundImages(env);
+  const opacity = await getOpacitySettings(env);
   
   let pageList = "";
   for (const page of pages) {
@@ -238,6 +282,7 @@ async function renderAdminPage(env, req) {
     title: "编辑 · Edge Notes",
     bgPc: bg.pc,
     bgMobile: bg.mobile,
+    opacity: opacity,
     body: `
       <main class="container edit">
         <header>
@@ -264,6 +309,32 @@ async function renderAdminPage(env, req) {
               <input type="text" id="bgMobile" value="${escapeHTML(bg.mobile)}" placeholder="手机端背景图片URL" />
               <button onclick="saveBackgroundUrls();" class="btn small">保存背景图</button>
               <span id="bgStatus" class="muted"></span>
+            </div>
+
+            <div class="opacity-settings">
+              <h3>透明度调整</h3>
+              <div class="opacity-item">
+                <label>卡片</label>
+                <input type="range" id="opacityCard" min="0.05" max="0.95" step="0.05" value="${opacity.card}" />
+                <span id="opacityCardValue">${opacity.card.toFixed(2)}</span>
+              </div>
+              <div class="opacity-item">
+                <label>文章</label>
+                <input type="range" id="opacityArticle" min="0.05" max="0.95" step="0.05" value="${opacity.article}" />
+                <span id="opacityArticleValue">${opacity.article.toFixed(2)}</span>
+              </div>
+              <div class="opacity-item">
+                <label>侧边栏</label>
+                <input type="range" id="opacitySidebar" min="0.05" max="0.95" step="0.05" value="${opacity.sidebar}" />
+                <span id="opacitySidebarValue">${opacity.sidebar.toFixed(2)}</span>
+              </div>
+              <div class="opacity-item">
+                <label>编辑区</label>
+                <input type="range" id="opacityEditor" min="0.05" max="0.95" step="0.05" value="${opacity.editor}" />
+                <span id="opacityEditorValue">${opacity.editor.toFixed(2)}</span>
+              </div>
+              <button onclick="saveOpacitySettings();" class="btn small">保存透明度</button>
+              <span id="opacityStatus" class="muted"></span>
             </div>
           </aside>
 
@@ -358,6 +429,41 @@ async function renderAdminPage(env, req) {
           }
           setTimeout(() => { if (bgStatusEl.textContent !== "保存成功，刷新页面查看效果") bgStatusEl.textContent = ""; }, 2000);
         }
+
+        async function saveOpacitySettings() {
+          const settings = {
+            card: document.getElementById("opacityCard").value,
+            article: document.getElementById("opacityArticle").value,
+            sidebar: document.getElementById("opacitySidebar").value,
+            editor: document.getElementById("opacityEditor").value,
+          };
+
+          for (const [key, value] of Object.entries(settings)) {
+            await fetch("/api/save-opacity", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ key, value }),
+            });
+          }
+
+          const statusEl = document.getElementById("opacityStatus");
+          statusEl.textContent = "保存成功，刷新页面查看效果";
+          setTimeout(() => { location.reload(); }, 1000);
+        }
+
+        // 滑块实时显示数值
+        document.getElementById("opacityCard").addEventListener("input", (e) => {
+          document.getElementById("opacityCardValue").textContent = parseFloat(e.target.value).toFixed(2);
+        });
+        document.getElementById("opacityArticle").addEventListener("input", (e) => {
+          document.getElementById("opacityArticleValue").textContent = parseFloat(e.target.value).toFixed(2);
+        });
+        document.getElementById("opacitySidebar").addEventListener("input", (e) => {
+          document.getElementById("opacitySidebarValue").textContent = parseFloat(e.target.value).toFixed(2);
+        });
+        document.getElementById("opacityEditor").addEventListener("input", (e) => {
+          document.getElementById("opacityEditorValue").textContent = parseFloat(e.target.value).toFixed(2);
+        });
 
         $("#save").addEventListener("click", () => save($("#editor").value));
         document.addEventListener("keydown", (e) => {
@@ -501,7 +607,7 @@ function escapeHTML(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function baseHTML({ title, bgPc, bgMobile, body }) {
+function baseHTML({ title, bgPc, bgMobile, opacity, body }) {
   const bgStyle = bgPc || bgMobile ? `
     <style>
       @media (min-aspect-ratio: 4/3) {
@@ -514,6 +620,15 @@ function baseHTML({ title, bgPc, bgMobile, body }) {
           background-image: url("${bgMobile}");
         }
       }
+    </style>
+  ` : "";
+
+  const dynamicStyle = Object.keys(opacity).length > 0 ? `
+    <style>
+      .card{background:rgba(21,24,33,${opacity.card})!important}
+      .read article{background:rgba(21,24,33,${opacity.article})!important}
+      .sidebar{background:rgba(21,24,33,${opacity.sidebar})!important}
+      .editor{background:rgba(21,24,33,${opacity.editor})!important}
     </style>
   ` : "";
 
@@ -535,7 +650,7 @@ a{color:var(--primary);text-decoration:none}
 .container.narrow{max-width:420px}
 header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
 h1{font-size:22px;margin:0}
-.card{background:rgba(21,24,33,0.12);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:18px;border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card{background:rgba(21,24,33,0.28);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:18px;border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:var(--shadow)}
 .read article{background:rgba(21,24,33,0.28);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);padding:22px;border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);box-shadow:var(--shadow);min-height:200px;margin:0}
 .tabs{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
 .tab{background:rgba(17,21,35,0.8);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.1);color:var(--text);padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;transition:all 0.3s}
@@ -552,10 +667,16 @@ h1{font-size:22px;margin:0}
 .btn-del:hover{background:#ff2222}
 .page-new{display:flex;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)}
 #newPageName{flex:1;height:32px;background:rgba(15,18,26,0.7);border:1px solid rgba(255,255,255,0.15);color:var(--text);padding:0 8px;border-radius:6px;font-size:12px}
-.bg-settings{margin-top:16px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)}
+.bg-settings{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)}
 .bg-settings h3{margin:0 0 10px;font-size:12px}
 .bg-settings label{display:block;font-size:11px;color:var(--muted);margin:8px 0 4px}
-.bg-settings input{width:100%;height:28px;background:rgba(15,18,26,0.7);border:1px solid rgba(255,255,255,0.15);color:var(--text);padding:0 6px;border-radius:6px;font-size:11px;margin-bottom:4px}
+.bg-settings input[type=text]{width:100%;height:28px;background:rgba(15,18,26,0.7);border:1px solid rgba(255,255,255,0.15);color:var(--text);padding:0 6px;border-radius:6px;font-size:11px;margin-bottom:4px}
+.opacity-settings{margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.1)}
+.opacity-settings h3{margin:0 0 10px;font-size:12px}
+.opacity-item{margin-bottom:8px}
+.opacity-item label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px}
+.opacity-item input[type=range]{width:100%;height:4px;margin-bottom:2px;cursor:pointer;accent-color:var(--primary)}
+.opacity-item span{font-size:10px;color:var(--primary);font-weight:bold}
 .btn.small{height:32px;padding:0 10px;font-size:12px}
 .editor{flex:1;display:flex;flex-direction:column;gap:12px;background:rgba(21,24,33,0.25);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 textarea{width:100%;min-height:55vh;resize:vertical;background:rgba(15,18,26,0.8);border:1px solid rgba(255,255,255,0.15);color:var(--text);padding:12px;border-radius:10px;font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace}
@@ -577,6 +698,7 @@ label{font-size:13px;color:var(--text);display:block;margin:10px 0 6px}
 }
 </style>
 ${bgStyle}
+${dynamicStyle}
 </head>
 <body>
 ${body}
