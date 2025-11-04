@@ -613,11 +613,13 @@ function baseHTML({ title, bgPc, bgMobile, opacity, body }) {
       @media (min-aspect-ratio: 4/3) {
         body {
           background-image: url("${bgPc}");
+          background-attachment: fixed;
         }
       }
       @media (max-aspect-ratio: 3/4) {
         body {
           background-image: url("${bgMobile}");
+          background-attachment: fixed;
         }
       }
     </style>
@@ -644,7 +646,8 @@ function baseHTML({ title, bgPc, bgMobile, opacity, body }) {
   --radius:14px; --shadow:0 10px 30px rgba(0,0,0,.25);
 }
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;background:#0b0c10;color:var(--text);font:16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;background-position:center center;background-repeat:no-repeat;background-size:cover;background-attachment:fixed}
+html{height:100%}
+body{margin:0;min-height:100vh;background:#0b0c10;color:var(--text);font:16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;background-position:center center;background-repeat:no-repeat;background-size:cover;background-attachment:fixed}
 a{color:var(--primary);text-decoration:none}
 .container{max-width:860px;margin:40px auto;padding:0 16px}
 .container.narrow{max-width:420px}
